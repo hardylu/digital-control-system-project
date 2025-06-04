@@ -1,0 +1,236 @@
+
+
+
+
+
+
+/*
+System Identification for DC Motors                       
+    A is for P2 on PCB
+    B is for P3 on PCB                            
+*/
+
+
+#include "mbed.h"
+#include <math.h>
+
+
+
+/*Hint: modify the code (start here)*/
+#define VOLTAGE_CMD        10.0f    // unit: voltage btw -12~12
+#define CONTROLLER          0       // 0 for Lab2 , 1 for Lab3
+/*Hint: modify the code (end here)*/
+
+
+
+#define pi 3.14159f  
+#define INPUT_VOLTAGE       12.0f 
+#define PWM_FREQUENCY       20.0f 
+#define PWM_STOP            0.5f    //motor will stop when pwm dutycycle is 0.5 (in this case)
+
+#define HALL_RESOLUTION     48.0f   //counter for encoder with AB phase: 12(ppr)*2(high,low)*2(A,B phase))
+      
+#define FRICTION_VOLTAGE    0.0f    //the minimum voltage that can drive the motor
+
+
+RawSerial pc(USBTX,USBRX);
+InterruptIn mybutton(USER_BUTTON);
+Ticker main_function;              
+PwmOut pwm1A(D7);
+PwmOut pwm1B(D8);
+PwmOut pwm2A(D11);
+PwmOut pwm2B(A3);
+DigitalOut led1(A4);
+
+float gear_ratio = 1/30.0;
+float Ts = 0.01; 
+float command = 0;
+float velocityA = 0;
+float velocityB = 0;
+bool  button_state = false;
+float dutycycle = PWM_STOP;
+short EncoderCounterA_pre = 0;
+
+void switch_on();
+void position_control();
+void ReadVelocity();
+void motor_drive(float voltA, float voltB);
+void InitMotor(float pwm_frequency);
+void InitEncoder(void);
+
+uint16_t CCR_value(float duty);
+
+
+int main() {
+    pc.baud(115200);
+    InitEncoder();              //Don't care, don't change it.
+    InitMotor(PWM_FREQUENCY);   //Don't care, don't change it.
+    mybutton.fall(&switch_on);   // if you push blue botton, switch_on will work
+    main_function.attach_us(&position_control, Ts*1000000); 
+    
+    while(1){}
+}
+
+
+
+
+void switch_on() {
+    led1 = !led1;
+    button_state = !button_state;
+    /*Hint: modify the code (start here)*/
+
+    /*Hint: modify the code (end here)*/
+
+}
+
+
+void position_control() {
+#if CONTROLLER == 0
+    if(button_state == true){
+        ReadVelocity();
+        command = VOLTAGE_CMD;
+        pc.printf("%.3f, %.3f\r\n",command, velocityA);
+        motor_drive(command,0);
+    }else{
+        dutycycle = PWM_STOP;
+        TIM1->CCR1 = CCR_value(dutycycle);
+        TIM1->CCR2 = CCR_value(dutycycle);
+        ReadVelocity();
+
+        pc.printf("%.3f, %.3f\r\n",0.0, velocityA);  
+    }
+#endif
+
+#if CONTROLLER == 1
+    // for lab3
+#endif
+}
+
+
+void ReadVelocity() {
+    short EncoderCounterA;
+    short EncoderCounterB;
+    
+    EncoderCounterA = TIM2->CNT ;
+    EncoderCounterB = TIM3->CNT ;
+    
+    /* Maybe you want to clear the counter*/
+    // TIM2->CNT = 0;
+    // TIM3->CNT = 0;
+
+
+
+    /*Hint: modify the code (start here)*/
+    short(difference) = EncoderCounterA - EncoderCounterA_pre;
+    float(round_encoder) = difference / HALL_RESOLUTION;
+    float(velocity_encoder) = round_encoder * 2 *pi / 0.01;  /*rad/s*/
+    velocityA = velocity_encoder * gear_ratio;
+
+
+    
+      
+    velocityB = EncoderCounterB;
+    //pc.printf("%f\r\n",velocityA);
+    EncoderCounterA_pre = EncoderCounterA;
+    /*Hint: modify the code (end here)*/
+}
+
+
+void motor_drive(float voltA, float voltB){
+    float dutycycleA = 0.5;
+    float dutycycleB = 0.5;
+    /*Hint: set a hard-constraint in case the voltage exceeds. (start here)*/
+    
+    /*Hint: set a hard-constraint in case the voltage exceeds. (end here)*/
+
+    /*Hint: convert volt to pwm duty (start here)*/
+    dutycycleA = 0.5+0.5*voltA/12;
+    dutycycleB = 0.5;
+    /*Hint: convert volt to pwm duty (end here)*/
+
+    TIM1->CCR1 = CCR_value(dutycycleA);  // this command will drive motorA
+    TIM1->CCR2 = CCR_value(dutycycleB);  // this command will drive motorB
+}
+
+
+uint16_t CCR_value(float duty) {
+    // Convert PWM duty cycle to CCR (capture/compare register) value
+    return duty * uint16_t(TIM1->ARR);
+}
+
+
+void InitEncoder(void) {
+    // Hardware Quadrature Encoder AB for Nucleo F446RE
+    // Output on debug port to host PC @ 9600 baud
+
+    /* Connections
+    PA_0 = Encoder1 A
+    PA_1 = Encoder1 B
+    PB_5 = Encoder2 A
+    PB_4 = Encoder2 B
+    */
+    
+    // configure GPIO PA0, PA1, PB5 & PB4 as inputs for Encoder
+    RCC->AHB1ENR |= 0x00000003;  // Enable clock for GPIOA & GPIOB
+ 
+    GPIOA->MODER   |= GPIO_MODER_MODER0_1 | GPIO_MODER_MODER1_1 ;           // PA0 & PA1 as Alternate Function  /*!< GPIO port mode register,               Address offset: 0x00      */
+    GPIOA->PUPDR   |= GPIO_PUPDR_PUPDR0_0 | GPIO_PUPDR_PUPDR1_0 ;           // Pull Down                        /*!< GPIO port pull-up/pull-down register,  Address offset: 0x0C      */
+    GPIOA->AFR[0]  |= 0x00000011 ;                                          // AF1 for PA0 & PA1                /*!< GPIO alternate function registers,     Address offset: 0x20-0x24 */
+    GPIOA->AFR[1]  |= 0x00000000 ;                                          //                                  /*!< GPIO alternate function registers,     Address offset: 0x20-0x24 */
+   
+ 
+    GPIOB->MODER   |= GPIO_MODER_MODER4_1 | GPIO_MODER_MODER5_1 ;           // PB5 & PB4 as Alternate Function  /*!< GPIO port mode register,               Address offset: 0x00      */
+    GPIOB->PUPDR   |= GPIO_PUPDR_PUPDR4_0 | GPIO_PUPDR_PUPDR5_0 ;           // Pull Down                        /*!< GPIO port pull-up/pull-down register,  Address offset: 0x0C      */
+    GPIOB->AFR[0]  |= 0x00220000 ;                                          // AF2 for PB5 & PB4                /*!< GPIO alternate function registers,     Address offset: 0x20-0x24 */
+    GPIOB->AFR[1]  |= 0x00000000 ;                                          //                                  /*!< GPIO alternate function registers,     Address offset: 0x20-0x24 */
+   
+    // configure TIM2 & TIM3 as Encoder input
+    RCC->APB1ENR |= 0x00000003;  // Enable clock for TIM2 & TIM3
+
+    TIM2->CR1   = 0x0001;     // CEN(Counter ENable)='1'     < TIM control register 1  
+    TIM2->SMCR  = 0x0003;     // SMS='011' (Encoder mode 3)  < TIM slave mode control register
+    TIM2->CCMR1 = 0xF1F1;     // CC1S='01' CC2S='01'         < TIM capture/compare mode register 1
+    TIM2->CCMR2 = 0x0000;     //                             < TIM capture/compare mode register 2
+    TIM2->CCER  = 0x0011;     // CC1P CC2P                   < TIM capture/compare enable register
+    TIM2->PSC   = 0x0000;     // Prescaler = (0+1)           < TIM prescaler
+    TIM2->ARR   = 0xffffffff; // reload at 0xfffffff         < TIM auto-reload register
+  
+    TIM2->CNT = 0x0000;  //reset the counter before we use it
+ 
+    TIM3->CR1   = 0x0001;     // CEN(Counter ENable)='1'     < TIM control register 1    
+    TIM3->SMCR  = 0x0003;     // SMS='011' (Encoder mode 3)  < TIM slave mode control register
+    TIM3->CCMR1 = 0xF1F1;     // CC1S='01' CC2S='01'         < TIM capture/compare mode register 1
+    TIM3->CCMR2 = 0x0000;     //                             < TIM capture/compare mode register 2
+    TIM3->CCER  = 0x0011;     // CC1P CC2P                   < TIM capture/compare enable register
+    TIM3->PSC   = 0x0000;     // Prescaler = (0+1)           < TIM prescaler
+    TIM3->ARR   = 0xffffffff; // reload at 0xfffffff         < TIM auto-reload register
+  
+    TIM3->CNT = 0x0000;  //reset the counter before we use it
+}
+
+void InitMotor(float pwm_frequency) {
+    uint16_t reload = 90000000 / int(pwm_frequency * 1000) - 1;
+    uint16_t stop = 90000000 / int(pwm_frequency * 1000) / 2 - 1;
+
+    TIM1->CR1   &= (~0x0001);   // CEN(Counter ENable) = '0'        < TIM control register 1              ;Disable counter at initial  
+    TIM1->PSC    = 0x0001;      // Prescaler = ('1' + 1)            < TIM prescaler                       ;Prescaler timer for Timer 1
+    TIM1->ARR    = reload;      // reload at 180MHz/PSC/PWM freq -1 < TIM auto-reload register            ;Set auto-reload, the pwm freq is (timer_clk /PSC /ARR)
+    TIM1->CCMR1 |= 0x0808;      // set PWM mode, preload            < TIM capture/compare mode register 1 ;Not necessary
+    TIM1->CCER  |= 0x0055;      // CC2NE CC2E CC1NE CC1E            < TIM capture/compare enable register ;Enable complementary PWM for channel 1, channel 2
+    TIM1->BDTR  |= 0x0C00;      // OSSI OSSR                        < TIM break and dead-time register    ;Set off-state selection
+    TIM1->EGR    = 0x0001;      // UG                               < TIM event generation register       ;Update generation
+    TIM1->CR1   |= 0x0001;      // CEN(Counter ENable) = '1'        < TIM control register 1              ;Enable counter
+/*
+    // used for debug
+    pc.printf("CR1 : %d\r",uint16_t(TIM1->CR1));
+    pc.printf("PSC : %d\r",uint16_t(TIM1->PSC));
+    pc.printf("ARR : %d\r",uint16_t(TIM1->ARR));
+    pc.printf("CCMR1 : %x\r",TIM1->CCMR1);
+    pc.printf("CCER : %x\r",TIM1->CCER);
+    pc.printf("BDTR : %x\r",TIM1->BDTR);
+    pc.printf("EGR : %x\r",TIM1->EGR);
+    pc.printf("stop : %d\r",stop);
+*/
+    TIM1->CCR1 = stop;
+    TIM1->CCR2 = stop;
+}
